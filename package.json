@@ -1,7 +1,7 @@
 {
-  "name": "@dan1d/mercadolibre-mcp",
-  "version": "1.0.2",
-  "description": "MercadoLibre MCP server for AI agents. Search products, browse categories, track trends across Latin America.",
+  "name": "mcp-mercado-livre",
+  "version": "0.1.0-paulo",
+  "description": "Fork de @dan1d/mercadolibre-mcp com OAuth offline (authorization_code + refresh_token), default MLB, filtros extras de search e curadoria de attributes. Auditado pra uso em Hermes Agent (Paulo Nonaka).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -10,36 +10,39 @@
       "default": "./dist/index.js"
     }
   },
+  "type": "module",
   "files": [
     "dist",
     "bin",
     "README.md",
+    "AUDIT.md",
     "LICENSE"
   ],
   "bin": {
-    "mercadolibre-mcp": "./bin/mcp-server.mjs"
+    "mcp-mercado-livre": "./bin/mcp-server.mjs",
+    "mcp-mercado-livre-oauth-bootstrap": "./bin/oauth-bootstrap.mjs"
   },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "oauth:bootstrap": "node bin/oauth-bootstrap.mjs"
   },
-  "author": "dan1d",
+  "author": "Paulo Nonaka (fork de dan1d)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dan1d/mercadolibre-mcp.git"
+    "url": "local"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "zod": "^3.23.0"
+    "@modelcontextprotocol/sdk": "1.29.0"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^1.6.1",
-    "typescript": "^5.4.0",
-    "vitest": "^1.6.1"
+    "@vitest/coverage-v8": "1.6.1",
+    "typescript": "5.4.5",
+    "vitest": "1.6.1"
   }
 }

@@ -17,6 +17,10 @@ export class MercadoLibreError extends Error {
     return this.status === 401;
   }
 
+  get isForbidden(): boolean {
+    return this.status === 403;
+  }
+
   get isNotFound(): boolean {
     return this.status === 404;
   }

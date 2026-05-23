@@ -1,4 +1,8 @@
-node_modules
-dist
-coverage
+node_modules/
+dist/
+*.log
 .env
+.env.local
+token_cache.json
+coverage/
+.DS_Store

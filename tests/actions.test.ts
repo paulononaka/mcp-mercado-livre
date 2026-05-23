@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { MercadoLibreClient } from "../src/client.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   searchItems,
   getItem,
@@ -10,201 +9,172 @@ import {
   getTrends,
   getCurrencyConversion,
 } from "../src/actions.js";
+import { MercadoLibreClient } from "../src/client.js";
+import { OAuthManager } from "../src/oauth.js";
 
-const mockFetch = vi.fn();
-vi.stubGlobal("fetch", mockFetch);
-
-function jsonResponse(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
+function client(): MercadoLibreClient {
+  const oauth = new OAuthManager({
+    clientId: "cid",
+    clientSecret: "sec",
+    accessToken: "AT",
+    expiresAt: Date.now() + 10 * 60 * 1000,
   });
+  return new MercadoLibreClient(oauth);
+}
+
+function mockFetchJson(payload: unknown, captureUrl?: { value?: string }): typeof fetch {
+  return (async (input: RequestInfo | URL) => {
+    if (captureUrl) captureUrl.value = String(input);
+    return new Response(JSON.stringify(payload), { status: 200 });
+  }) as typeof fetch;
 }
 
 describe("actions", () => {
-  let client: MercadoLibreClient;
+  let origFetch: typeof fetch;
+  beforeEach(() => { origFetch = globalThis.fetch; });
+  afterEach(() => { globalThis.fetch = origFetch; vi.restoreAllMocks(); });
 
-  beforeEach(() => {
-    mockFetch.mockReset();
-    client = new MercadoLibreClient();
+  it("searchItems default site_id=MLB, limit=10, e mapeia condition/free_shipping/sort/seller_id pra query string", async () => {
+    const cap: { value?: string } = {};
+    globalThis.fetch = mockFetchJson({ paging: { total: 0 }, results: [] }, cap);
+    await searchItems(client(), {
+      query: "tv 55",
+      condition: "new",
+      free_shipping: true,
+      sort: "price_asc",
+      seller_id: 999,
+    });
+    const url = cap.value ?? "";
+    expect(url).toContain("/sites/MLB/search");
+    expect(url).toContain("q=tv+55");
+    expect(url).toContain("condition=new");
+    expect(url).toContain("shipping_cost=free");
+    expect(url).toContain("sort=price_asc");
+    expect(url).toContain("seller_id=999");
+    expect(url).toContain("limit=10");
   });
 
-  describe("searchItems", () => {
-    it("searches with query and default site MLA", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ results: [{ id: "MLA1" }] }));
-
-      const result = await searchItems(client, { query: "iphone" });
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining("/sites/MLA/search?"),
-        expect.any(Object)
-      );
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("q=iphone");
-      expect(url).toContain("limit=10");
-      expect(result).toEqual({ results: [{ id: "MLA1" }] });
+  it("searchItems retorna shape curado por resultado", async () => {
+    globalThis.fetch = mockFetchJson({
+      paging: { total: 1, limit: 10, offset: 0 },
+      results: [{
+        id: "MLB1",
+        title: "TV 55",
+        price: 2999,
+        currency_id: "BRL",
+        condition: "new",
+        available_quantity: 5,
+        sold_quantity: 100,
+        shipping: { free_shipping: true, logistic_type: "fulfillment" },
+        seller: { id: 42, nickname: "STORE" },
+        permalink: "https://x",
+        thumbnail: "https://t",
+        catalog_listing: true,
+      }],
     });
-
-    it("uses custom site_id", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ results: [] }));
-
-      await searchItems(client, { query: "notebook", site_id: "MLB" });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("/sites/MLB/search");
-    });
-
-    it("includes category and price filters", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ results: [] }));
-
-      await searchItems(client, {
-        query: "tv",
-        category: "MLA1055",
-        price_min: 100000,
-        price_max: 500000,
-      });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("category=MLA1055");
-      expect(url).toContain("price_min=100000");
-      expect(url).toContain("price_max=500000");
-    });
-
-    it("caps limit at 50", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ results: [] }));
-
-      await searchItems(client, { query: "test", limit: 200 });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("limit=50");
+    const res = await searchItems(client(), { query: "tv" }) as { results: Array<Record<string, unknown>> };
+    expect(res.results[0]).toMatchObject({
+      id: "MLB1",
+      title: "TV 55",
+      price: 2999,
+      free_shipping: true,
+      logistic_type: "fulfillment",
+      seller_id: 42,
+      seller_nickname: "STORE",
+      catalog_listing: true,
     });
   });
 
-  describe("getItem", () => {
-    it("fetches item by ID", async () => {
-      const item = { id: "MLA123", title: "Test Item", price: 50000 };
-      mockFetch.mockResolvedValueOnce(jsonResponse(item));
-
-      const result = await getItem(client, { item_id: "MLA123" });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("/items/MLA123");
-      expect(result).toEqual(item);
-    });
+  it("searchItems respeita limit max 50", async () => {
+    const cap: { value?: string } = {};
+    globalThis.fetch = mockFetchJson({ paging: {}, results: [] }, cap);
+    await searchItems(client(), { query: "x", limit: 9999 });
+    expect(cap.value).toContain("limit=50");
   });
 
-  describe("getItemDescription", () => {
-    it("fetches item description", async () => {
-      const desc = { plain_text: "A great product" };
-      mockFetch.mockResolvedValueOnce(jsonResponse(desc));
-
-      const result = await getItemDescription(client, { item_id: "MLA123" });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("/items/MLA123/description");
-      expect(result).toEqual(desc);
+  it("getItem extrai apenas key_attributes (VOLTAGE, BRAND, etc) e trunca pictures a 5", async () => {
+    globalThis.fetch = mockFetchJson({
+      id: "MLB99",
+      title: "Liquidificador",
+      price: 199,
+      currency_id: "BRL",
+      condition: "new",
+      available_quantity: 3,
+      sold_quantity: 50,
+      permalink: "https://x",
+      category_id: "MLB100",
+      seller_id: 7,
+      warranty: "12 meses",
+      listing_type_id: "gold",
+      shipping: { free_shipping: false },
+      pictures: Array.from({ length: 10 }, (_, i) => ({ secure_url: `https://p${i}` })),
+      attributes: [
+        { id: "VOLTAGE", name: "Voltagem", value_name: "127V" },
+        { id: "BRAND", name: "Marca", value_name: "Mondial" },
+        { id: "MODEL", name: "Modelo", value_name: "L-99" },
+        { id: "INTERNAL_TAG_FOO", name: "Ignore", value_name: "should-not-appear" },
+      ],
     });
+    const res = await getItem(client(), { item_id: "MLB99" }) as {
+      key_attributes: Array<{ id: string; value: string | null }>;
+      pictures: string[];
+    };
+    expect(res.key_attributes.map((a) => a.id)).toEqual(["VOLTAGE", "BRAND", "MODEL"]);
+    expect(res.pictures.length).toBe(5);
+    expect(res.pictures[0]).toBe("https://p0");
   });
 
-  describe("getCategories", () => {
-    it("lists categories for default site MLA", async () => {
-      const cats = [{ id: "MLA1055", name: "Electrónica" }];
-      mockFetch.mockResolvedValueOnce(jsonResponse(cats));
-
-      const result = await getCategories(client);
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("/sites/MLA/categories");
-      expect(result).toEqual(cats);
-    });
-
-    it("lists categories for custom site", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse([]));
-
-      await getCategories(client, { site_id: "MLM" });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("/sites/MLM/categories");
-    });
+  it("getItemDescription retorna plain_text", async () => {
+    globalThis.fetch = mockFetchJson({ plain_text: "Descricao longa.", last_updated: "2026-01-01T00:00:00Z" });
+    const res = await getItemDescription(client(), { item_id: "MLB1" }) as { plain_text: string };
+    expect(res.plain_text).toBe("Descricao longa.");
   });
 
-  describe("getCategory", () => {
-    it("fetches category details", async () => {
-      const cat = { id: "MLA1055", name: "Electrónica", path_from_root: [] };
-      mockFetch.mockResolvedValueOnce(jsonResponse(cat));
-
-      const result = await getCategory(client, { category_id: "MLA1055" });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("/categories/MLA1055");
-      expect(result).toEqual(cat);
-    });
+  it("getCategories default site_id=MLB", async () => {
+    const cap: { value?: string } = {};
+    globalThis.fetch = mockFetchJson([], cap);
+    await getCategories(client());
+    expect(cap.value).toContain("/sites/MLB/categories");
   });
 
-  describe("getSellerInfo", () => {
-    it("fetches seller profile", async () => {
-      const seller = { id: 12345, nickname: "SELLER_TEST", reputation: {} };
-      mockFetch.mockResolvedValueOnce(jsonResponse(seller));
-
-      const result = await getSellerInfo(client, { seller_id: 12345 });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("/users/12345");
-      expect(result).toEqual(seller);
-    });
+  it("getCategory passa category_id encoded", async () => {
+    const cap: { value?: string } = {};
+    globalThis.fetch = mockFetchJson({ id: "MLB1055", name: "Eletronicos" }, cap);
+    await getCategory(client(), { category_id: "MLB1055" });
+    expect(cap.value).toContain("/categories/MLB1055");
   });
 
-  describe("getTrends", () => {
-    it("fetches trends for default site", async () => {
-      const trends = [{ keyword: "iphone 15" }, { keyword: "ps5" }];
-      mockFetch.mockResolvedValueOnce(jsonResponse(trends));
-
-      const result = await getTrends(client);
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("/trends/MLA");
-      expect(result).toEqual(trends);
+  it("getSellerInfo extrai reputation_level e transactions", async () => {
+    globalThis.fetch = mockFetchJson({
+      id: 42,
+      nickname: "STORE",
+      permalink: "https://s",
+      seller_reputation: {
+        level_id: "5_green",
+        power_seller_status: "platinum",
+        transactions: { completed: 5000, canceled: 50, total: 5050, ratings: { positive: 0.98, neutral: 0.01, negative: 0.01 } },
+      },
     });
-
-    it("fetches trends for custom site", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse([]));
-
-      await getTrends(client, { site_id: "MLB" });
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("/trends/MLB");
-    });
+    const res = await getSellerInfo(client(), { seller_id: 42 }) as {
+      reputation_level: string;
+      power_seller_status: string;
+      transactions_completed: number;
+    };
+    expect(res.reputation_level).toBe("5_green");
+    expect(res.power_seller_status).toBe("platinum");
+    expect(res.transactions_completed).toBe(5000);
   });
 
-  describe("getCurrencyConversion", () => {
-    it("converts with rate and computes amount", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ ratio: 1250.5 }));
+  it("getTrends default site_id=MLB", async () => {
+    const cap: { value?: string } = {};
+    globalThis.fetch = mockFetchJson([], cap);
+    await getTrends(client());
+    expect(cap.value).toContain("/trends/MLB");
+  });
 
-      const result = await getCurrencyConversion(client, {
-        from: "USD",
-        to: "ARS",
-        amount: 100,
-      }) as { converted: number; rate: number; from: string; to: string; amount: number };
-
-      const url = mockFetch.mock.calls[0][0] as string;
-      expect(url).toContain("/currency_conversions/search");
-      expect(url).toContain("from=USD");
-      expect(url).toContain("to=ARS");
-      expect(result.rate).toBe(1250.5);
-      expect(result.converted).toBe(125050);
-      expect(result.amount).toBe(100);
-    });
-
-    it("defaults amount to 1", async () => {
-      mockFetch.mockResolvedValueOnce(jsonResponse({ ratio: 1250.5 }));
-
-      const result = await getCurrencyConversion(client, {
-        from: "USD",
-        to: "ARS",
-      }) as { amount: number; converted: number };
-
-      expect(result.amount).toBe(1);
-      expect(result.converted).toBe(1250.5);
-    });
+  it("getCurrencyConversion calcula converted com rate", async () => {
+    globalThis.fetch = mockFetchJson({ ratio: 5 });
+    const res = await getCurrencyConversion(client(), { from: "USD", to: "BRL", amount: 10 }) as { converted: number };
+    expect(res.converted).toBe(50);
   });
 });

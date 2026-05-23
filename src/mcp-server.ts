@@ -1,158 +1,175 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { CallToolRequestSchema, ListToolsRequestSchema, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { createMercadoLibreTools } from "./index.js";
+import { OAuthManager } from "./oauth.js";
+import type {
+  SearchItemsParams,
+  GetItemParams,
+  GetItemDescriptionParams,
+  GetCategoriesParams,
+  GetCategoryParams,
+  GetSellerInfoParams,
+  GetTrendsParams,
+  GetCurrencyConversionParams,
+} from "./schemas.js";
 
-export function createMcpServer(accessToken?: string) {
-  const { tools } = createMercadoLibreTools(accessToken);
+const SEARCH_ITEMS_TOOL: Tool = {
+  name: "search_items",
+  description: "Busca produtos no MercadoLibre por palavra-chave. Default site_id=MLB (Brasil). Filtros: category, price_min/max, condition (new/used), free_shipping, sort (relevance|price_asc|price_desc), seller_id. Retorna lista curada (max 50, default 10) com price/condition/seller/free_shipping/permalink.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Texto da busca" },
+      site_id: { type: "string", description: "Site ID (default: MLB). MLB=Brasil, MLA=Argentina, MLM=Mexico, MLC=Chile, MCO=Colombia" },
+      category: { type: "string", description: "Category ID pra filtrar (ex: MLB1055)" },
+      price_min: { type: "number", description: "Preco minimo" },
+      price_max: { type: "number", description: "Preco maximo" },
+      condition: { type: "string", enum: ["new", "used", "not_specified"], description: "Condicao do item" },
+      free_shipping: { type: "boolean", description: "Apenas itens com frete gratis" },
+      sort: { type: "string", enum: ["relevance", "price_asc", "price_desc"], description: "Ordenacao (default: relevance)" },
+      seller_id: { type: "number", description: "Filtrar por seller especifico" },
+      limit: { type: "number", description: "Max resultados (default 10, max 50)" },
+      offset: { type: "number", description: "Pagination offset" },
+    },
+    required: ["query"],
+  },
+};
 
-  const server = new McpServer({
-    name: "mercadolibre-mcp",
-    version: "1.0.0",
+const GET_ITEM_TOOL: Tool = {
+  name: "get_item",
+  description: "Detalhes completos de um item MercadoLibre: title, price, stock, seller, condition, pictures (max 5) e key_attributes curados (BRAND, MODEL, VOLTAGE, POWER_SOURCE, COLOR, CAPACITY, etc).",
+  inputSchema: {
+    type: "object",
+    properties: { item_id: { type: "string", description: "Item ID (ex: MLB1234567890)" } },
+    required: ["item_id"],
+  },
+};
+
+const GET_ITEM_DESCRIPTION_TOOL: Tool = {
+  name: "get_item_description",
+  description: "Texto completo da descricao de um item MercadoLibre (plain_text).",
+  inputSchema: {
+    type: "object",
+    properties: { item_id: { type: "string", description: "Item ID" } },
+    required: ["item_id"],
+  },
+};
+
+const GET_CATEGORIES_TOOL: Tool = {
+  name: "get_categories",
+  description: "Lista todas as categorias top-level de um site MercadoLibre. Default site_id=MLB.",
+  inputSchema: {
+    type: "object",
+    properties: { site_id: { type: "string", description: "Site ID (default: MLB)" } },
+  },
+};
+
+const GET_CATEGORY_TOOL: Tool = {
+  name: "get_category",
+  description: "Detalhes de uma categoria: nome, path from root, e children.",
+  inputSchema: {
+    type: "object",
+    properties: { category_id: { type: "string", description: "Category ID (ex: MLB1055)" } },
+    required: ["category_id"],
+  },
+};
+
+const GET_SELLER_INFO_TOOL: Tool = {
+  name: "get_seller_info",
+  description: "Perfil do vendedor: reputation_level, power_seller_status, transactions_completed/canceled/total, ratings (positive/neutral/negative).",
+  inputSchema: {
+    type: "object",
+    properties: { seller_id: { type: "number", description: "Seller user ID" } },
+    required: ["seller_id"],
+  },
+};
+
+const GET_TRENDS_TOOL: Tool = {
+  name: "get_trends",
+  description: "Buscas em alta no MercadoLibre pra um site/pais. Default site_id=MLB.",
+  inputSchema: {
+    type: "object",
+    properties: { site_id: { type: "string", description: "Site ID (default: MLB)" } },
+  },
+};
+
+const GET_CURRENCY_CONVERSION_TOOL: Tool = {
+  name: "get_currency_conversion",
+  description: "Conversao entre moedas usando rates do MercadoLibre (BRL, ARS, MXN, USD, etc).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      from: { type: "string", description: "Moeda origem (ex: USD)" },
+      to: { type: "string", description: "Moeda destino (ex: BRL)" },
+      amount: { type: "number", description: "Quantia a converter (default: 1)" },
+    },
+    required: ["from", "to"],
+  },
+};
+
+export const TOOL_DEFINITIONS: Tool[] = [
+  SEARCH_ITEMS_TOOL,
+  GET_ITEM_TOOL,
+  GET_ITEM_DESCRIPTION_TOOL,
+  GET_CATEGORIES_TOOL,
+  GET_CATEGORY_TOOL,
+  GET_SELLER_INFO_TOOL,
+  GET_TRENDS_TOOL,
+  GET_CURRENCY_CONVERSION_TOOL,
+];
+
+type ToolResult = {
+  content: Array<{ type: "text"; text: string }>;
+  isError?: boolean;
+};
+
+async function wrap<T>(fn: () => Promise<T>): Promise<ToolResult> {
+  try {
+    const result = await fn();
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { content: [{ type: "text", text: message }], isError: true };
+  }
+}
+
+export function createMcpServer(oauth: OAuthManager): Server {
+  const { tools } = createMercadoLibreTools(oauth);
+
+  const server = new Server(
+    { name: "mcp-mercado-livre", version: "0.1.0-paulo" },
+    { capabilities: { tools: {} } },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOL_DEFINITIONS }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const name = request.params.name;
+    const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+    switch (name) {
+      case "search_items":
+        return wrap(() => tools.search_items(args as unknown as SearchItemsParams));
+      case "get_item":
+        return wrap(() => tools.get_item(args as unknown as GetItemParams));
+      case "get_item_description":
+        return wrap(() => tools.get_item_description(args as unknown as GetItemDescriptionParams));
+      case "get_categories":
+        return wrap(() => tools.get_categories(args as unknown as GetCategoriesParams));
+      case "get_category":
+        return wrap(() => tools.get_category(args as unknown as GetCategoryParams));
+      case "get_seller_info":
+        return wrap(() => tools.get_seller_info(args as unknown as GetSellerInfoParams));
+      case "get_trends":
+        return wrap(() => tools.get_trends(args as unknown as GetTrendsParams));
+      case "get_currency_conversion":
+        return wrap(() => tools.get_currency_conversion(args as unknown as GetCurrencyConversionParams));
+      default:
+        return {
+          content: [{ type: "text", text: `Tool desconhecido: ${name}` }],
+          isError: true,
+        };
+    }
   });
-
-  server.tool(
-    "search_items",
-    "Search products on MercadoLibre by keyword. Supports filtering by category, price range, and site (MLA=Argentina, MLB=Brazil, MLM=Mexico, etc.)",
-    {
-      query: z.string().describe("Search query"),
-      site_id: z.string().optional().describe("Site ID (default: MLA). MLA=Argentina, MLB=Brazil, MLM=Mexico, MLC=Chile, MCO=Colombia"),
-      category: z.string().optional().describe("Category ID to filter"),
-      price_min: z.number().optional().describe("Minimum price"),
-      price_max: z.number().optional().describe("Maximum price"),
-      limit: z.number().optional().describe("Max results (default 10, max 50)"),
-      offset: z.number().optional().describe("Pagination offset"),
-    },
-    async (params) => {
-      try {
-        const result = await tools.search_items(params);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: message }], isError: true };
-      }
-    },
-  );
-
-  server.tool(
-    "get_item",
-    "Get full details of a MercadoLibre item including title, price, pictures, seller, condition, and stock.",
-    {
-      item_id: z.string().describe("Item ID (e.g. MLA1234567890)"),
-    },
-    async (params) => {
-      try {
-        const result = await tools.get_item(params);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: message }], isError: true };
-      }
-    },
-  );
-
-  server.tool(
-    "get_item_description",
-    "Get the full text description of a MercadoLibre item.",
-    {
-      item_id: z.string().describe("Item ID"),
-    },
-    async (params) => {
-      try {
-        const result = await tools.get_item_description(params);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: message }], isError: true };
-      }
-    },
-  );
-
-  server.tool(
-    "get_categories",
-    "List all top-level categories for a MercadoLibre site.",
-    {
-      site_id: z.string().optional().describe("Site ID (default: MLA)"),
-    },
-    async (params) => {
-      try {
-        const result = await tools.get_categories(params);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: message }], isError: true };
-      }
-    },
-  );
-
-  server.tool(
-    "get_category",
-    "Get category details including name, path from root, and children categories.",
-    {
-      category_id: z.string().describe("Category ID (e.g. MLA1055)"),
-    },
-    async (params) => {
-      try {
-        const result = await tools.get_category(params);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: message }], isError: true };
-      }
-    },
-  );
-
-  server.tool(
-    "get_seller_info",
-    "Get seller profile including reputation, ratings, and transaction stats.",
-    {
-      seller_id: z.number().describe("Seller user ID"),
-    },
-    async (params) => {
-      try {
-        const result = await tools.get_seller_info(params);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: message }], isError: true };
-      }
-    },
-  );
-
-  server.tool(
-    "get_trends",
-    "Get current trending searches on MercadoLibre for a specific site/country.",
-    {
-      site_id: z.string().optional().describe("Site ID (default: MLA)"),
-    },
-    async (params) => {
-      try {
-        const result = await tools.get_trends(params);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: message }], isError: true };
-      }
-    },
-  );
-
-  server.tool(
-    "get_currency_conversion",
-    "Convert between currencies using MercadoLibre exchange rates (ARS, BRL, MXN, USD, etc.).",
-    {
-      from: z.string().describe("Source currency code (e.g. USD)"),
-      to: z.string().describe("Target currency code (e.g. ARS)"),
-      amount: z.number().optional().describe("Amount to convert (default: 1)"),
-    },
-    async (params) => {
-      try {
-        const result = await tools.get_currency_conversion(params);
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { content: [{ type: "text", text: message }], isError: true };
-      }
-    },
-  );
 
   return server;
 }

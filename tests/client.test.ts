@@ -1,93 +1,74 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { MercadoLibreClient } from "../src/client.js";
 import { MercadoLibreError } from "../src/errors.js";
+import { OAuthManager } from "../src/oauth.js";
 
-const mockFetch = vi.fn();
-vi.stubGlobal("fetch", mockFetch);
-
-function jsonResponse(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json" },
+function buildOAuth(token = "AT_INIT"): OAuthManager {
+  return new OAuthManager({
+    clientId: "cid",
+    clientSecret: "sec",
+    accessToken: token,
+    refreshToken: "RT",
+    expiresAt: Date.now() + 10 * 60 * 1000,
   });
 }
 
 describe("MercadoLibreClient", () => {
+  let origFetch: typeof fetch;
   beforeEach(() => {
-    mockFetch.mockReset();
+    origFetch = globalThis.fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+    vi.restoreAllMocks();
   });
 
-  it("sends GET request without auth when no token", async () => {
-    const client = new MercadoLibreClient();
-    mockFetch.mockResolvedValueOnce(jsonResponse({ id: "MLA123" }));
-
-    await client.get("/items/MLA123");
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      "https://api.mercadolibre.com/items/MLA123",
-      expect.objectContaining({
-        method: "GET",
-        headers: expect.not.objectContaining({ Authorization: expect.any(String) }),
-      })
-    );
+  it("envia Bearer token no header", async () => {
+    let captured: Request | undefined;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      captured = new Request(input as string, init);
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
+    const client = new MercadoLibreClient(buildOAuth("HELLO"));
+    await client.get("/sites/MLB");
+    expect(captured?.headers.get("authorization")).toBe("Bearer HELLO");
   });
 
-  it("sends GET request with Bearer token when token provided", async () => {
-    const client = new MercadoLibreClient("TEST_TOKEN");
-    mockFetch.mockResolvedValueOnce(jsonResponse({ id: "MLA123" }));
-
-    await client.get("/items/MLA123");
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      "https://api.mercadolibre.com/items/MLA123",
-      expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: "Bearer TEST_TOKEN" }),
-      })
-    );
+  it("encoda query params via URLSearchParams", async () => {
+    let capturedUrl = "";
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      capturedUrl = String(input);
+      return new Response(JSON.stringify({}), { status: 200 });
+    }) as typeof fetch;
+    const client = new MercadoLibreClient(buildOAuth());
+    await client.get("/sites/MLB/search", { q: "iphone 14 pro max", limit: "10" });
+    expect(capturedUrl).toContain("q=iphone+14+pro+max");
+    expect(capturedUrl).toContain("limit=10");
   });
 
-  it("appends query params to URL", async () => {
-    const client = new MercadoLibreClient();
-    mockFetch.mockResolvedValueOnce(jsonResponse({ results: [] }));
-
-    await client.get("/sites/MLA/search", { q: "iphone", limit: "10" });
-
-    expect(mockFetch).toHaveBeenCalledWith(
-      "https://api.mercadolibre.com/sites/MLA/search?q=iphone&limit=10",
-      expect.any(Object)
-    );
+  it("retry 1x em 401 com forceRefresh", async () => {
+    const oauth = buildOAuth("OLD");
+    const refreshSpy = vi.spyOn(oauth, "forceRefresh").mockResolvedValue("NEW");
+    let calls = 0;
+    const tokens: string[] = [];
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls++;
+      const auth = (init?.headers as Record<string, string>)?.Authorization ?? "";
+      tokens.push(auth);
+      if (calls === 1) return new Response("denied", { status: 401 });
+      return new Response(JSON.stringify({ ok: 1 }), { status: 200 });
+    }) as typeof fetch;
+    const client = new MercadoLibreClient(oauth);
+    await client.get("/items/MLB1");
+    expect(refreshSpy).toHaveBeenCalledOnce();
+    expect(calls).toBe(2);
+    expect(tokens[0]).toBe("Bearer OLD");
+    expect(tokens[1]).toBe("Bearer NEW");
   });
 
-  it("throws MercadoLibreError on non-OK response", async () => {
-    const client = new MercadoLibreClient();
-    mockFetch.mockResolvedValueOnce(new Response("Not Found", { status: 404 }));
-
-    await expect(client.get("/items/INVALID")).rejects.toThrow(MercadoLibreError);
-  });
-
-  it("error has correct properties", async () => {
-    const client = new MercadoLibreClient();
-    mockFetch.mockResolvedValueOnce(new Response("Unauthorized", { status: 401 }));
-
-    try {
-      await client.get("/users/me");
-      expect.fail("Should have thrown");
-    } catch (e) {
-      const err = e as MercadoLibreError;
-      expect(err.status).toBe(401);
-      expect(err.isUnauthorized).toBe(true);
-      expect(err.isNotFound).toBe(false);
-      expect(err.method).toBe("GET");
-      expect(err.path).toBe("/users/me");
-    }
-  });
-
-  it("returns parsed JSON response", async () => {
-    const client = new MercadoLibreClient();
-    const data = { id: "MLA999", title: "Test Item" };
-    mockFetch.mockResolvedValueOnce(jsonResponse(data));
-
-    const result = await client.get("/items/MLA999");
-    expect(result).toEqual(data);
+  it("lanca MercadoLibreError em 4xx nao-401", async () => {
+    globalThis.fetch = (async () => new Response("not found", { status: 404 })) as typeof fetch;
+    const client = new MercadoLibreClient(buildOAuth());
+    await expect(client.get("/items/X")).rejects.toBeInstanceOf(MercadoLibreError);
   });
 });

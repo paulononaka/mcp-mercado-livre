@@ -1,4 +1,5 @@
 import { MercadoLibreClient } from "./client.js";
+import { OAuthManager } from "./oauth.js";
 import {
   searchItems,
   getItem,
@@ -20,8 +21,8 @@ import type {
   GetCurrencyConversionParams,
 } from "./schemas.js";
 
-export function createMercadoLibreTools(accessToken?: string) {
-  const client = new MercadoLibreClient(accessToken);
+export function createMercadoLibreTools(oauth: OAuthManager) {
+  const client = new MercadoLibreClient(oauth);
 
   return {
     tools: {
@@ -39,6 +40,7 @@ export function createMercadoLibreTools(accessToken?: string) {
 
 export { MercadoLibreClient } from "./client.js";
 export { MercadoLibreError } from "./errors.js";
+export { OAuthManager, OAuthError, exchangeAuthorizationCode } from "./oauth.js";
 export {
   searchItems,
   getItem,
@@ -58,4 +60,6 @@ export type {
   GetSellerInfoParams,
   GetTrendsParams,
   GetCurrencyConversionParams,
+  OAuthConfig,
+  TokenCache,
 } from "./schemas.js";

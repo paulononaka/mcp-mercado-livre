@@ -1,195 +1,77 @@
-# mercadolibre-mcp
+# mcp-mercado-livre (Paulo fork)
 
-**MercadoLibre marketplace for AI agents.**
+Fork de [`@dan1d/mercadolibre-mcp`](https://github.com/dan1d/mercadolibre-mcp) `v1.0.2` com adaptações pra uso no Hermes Agent (Fran Casanha — Paulo Nonaka).
 
-[![npm version](https://img.shields.io/npm/v/@dan1d/mercadolibre-mcp)](https://www.npmjs.com/package/@dan1d/mercadolibre-mcp)
-[![tests](https://img.shields.io/github/actions/workflow/status/dan1d/mercadolibre-mcp/ci.yml?label=tests)](https://github.com/dan1d/mercadolibre-mcp/actions)
-[![npm downloads](https://img.shields.io/npm/dm/@dan1d/mercadolibre-mcp)](https://www.npmjs.com/package/@dan1d/mercadolibre-mcp)
-[![license](https://img.shields.io/npm/l/@dan1d/mercadolibre-mcp)](./LICENSE)
+**Mudanças em relação ao upstream** (detalhe completo em [`AUDIT.md`](./AUDIT.md)):
 
-MCP server that connects AI agents to [MercadoLibre](https://www.mercadolibre.com), the largest e-commerce marketplace in Latin America (150M+ users). Search products, get item details, browse categories, track trends, and convert currencies across Argentina, Brazil, Mexico, Chile, Colombia, and more.
+1. **OAuth offline obrigatório** — `authorization_code` + `refresh_token` (ML descontinuou acesso anônimo aos endpoints públicos em 2026; só `/categories/{id}` ficou aberto).
+2. **Bootstrap OAuth local** — `bin/oauth-bootstrap.mjs` sobe HTTP server, abre browser pra autorizar, captura code, troca por tokens, salva em `~/.config/mercadolivre/token_cache.json` chmod 600.
+3. **Refresh transparente** — `src/oauth.ts` `OAuthManager` faz refresh quando token entra no skew (60s antes de expirar). Retry 1x em 401 com `forceRefresh`.
+4. **Default site_id = MLB** (era MLA upstream) — Paulo é Brasil.
+5. **Filtros extras em `search_items`** — `condition`, `free_shipping`, `sort`, `seller_id` (além de `category`/`price_min/max`).
+6. **Output curado** — `search_items` retorna ~14 campos por resultado (vs raw JSON do ML); `get_item` extrai só `key_attributes` whitelistadas (`VOLTAGE`, `POWER_SOURCE`, `BRAND`, `MODEL`, `COLOR`, `CAPACITY`, etc) e trunca pictures a 5.
+7. **SDK pinado exato** — `@modelcontextprotocol/sdk@1.29.0` (sem caret).
+8. **API low-level** — `Server` + `setRequestHandler` (mesmo padrão do `mcp-google-maps-paulo`), evita deep inference do `McpServer.tool()`.
 
-[npm](https://www.npmjs.com/package/@dan1d/mercadolibre-mcp) | [GitHub](https://github.com/dan1d/mercadolibre-mcp)
+## Pré-requisitos
 
----
+- Node 22+ (`--env-file` nativo).
+- Conta Mercado Livre + App criada em `https://developers.mercadolivre.com.br/devcenter/` com `CLIENT_ID` + `CLIENT_SECRET`.
 
-## Quick Start
+## Setup
 
-No API key required for public endpoints (search, items, categories, trends).
+1. Criar `/Users/fran/.config/mercadolivre/.env` (chmod 600):
+   ```dotenv
+   MERCADOLIBRE_CLIENT_ID=...
+   MERCADOLIBRE_CLIENT_SECRET=...
+   MERCADOLIBRE_REDIRECT_URI=http://localhost:8080/callback
+   ```
+   (Não preencha `MERCADOLIBRE_REFRESH_TOKEN` — o bootstrap vai gravar em `token_cache.json`.)
 
-### Claude Desktop
+2. Bootstrap OAuth (uma vez):
+   ```bash
+   cd /Users/fran/codes/mcp-mercado-livre
+   node --env-file=/Users/fran/.config/mercadolivre/.env bin/oauth-bootstrap.mjs
+   ```
+   Vai abrir browser pra você autorizar a App acessar sua conta. Tokens salvos em `~/.config/mercadolivre/token_cache.json` (chmod 600). Refresh_token vale ~6 meses.
 
-Add to your `claude_desktop_config.json`:
+3. Build:
+   ```bash
+   npm install && npm run build
+   ```
 
-```json
-{
-  "mcpServers": {
-    "mercadolibre": {
-      "command": "npx",
-      "args": ["-y", "@dan1d/mercadolibre-mcp"]
-    }
-  }
-}
-```
+4. Registrar no Hermes (`~/.hermes/config.yaml`):
+   ```yaml
+   mcp_servers:
+     mercado-livre:
+       command: node
+       args:
+         - --env-file=/Users/fran/.config/mercadolivre/.env
+         - /Users/fran/codes/mcp-mercado-livre/dist/mcp-server.js
+       env:
+         DOTENV_CONFIG_QUIET: "true"
+   ```
+   *Nota: o entrypoint correto é `bin/mcp-server.mjs`, mas dele importa `dist/mcp-server.js`. Pode usar diretamente `bin/mcp-server.mjs` se preferir — ambos funcionam.*
 
-### Claude Code
+## Tools expostas
 
-```bash
-claude mcp add mercadolibre -- npx -y @dan1d/mercadolibre-mcp
-```
+| Tool | O que faz |
+|---|---|
+| `search_items` | Busca por palavra-chave + filtros (condition, free_shipping, sort, seller_id, price range, category). Default site MLB. |
+| `get_item` | Detalhes do item + `key_attributes` curados (VOLTAGE/BRAND/MODEL/etc) + max 5 pictures. |
+| `get_item_description` | Descrição em texto plano. |
+| `get_categories` | Top-level categories de um site. |
+| `get_category` | Detalhes de uma categoria (path + children). |
+| `get_seller_info` | Reputação + transactions + ratings do vendedor. |
+| `get_trends` | Buscas em alta. |
+| `get_currency_conversion` | Conversão BRL/USD/ARS/MXN com rate ML. |
 
-### Cursor
-
-Add to `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "mercadolibre": {
-      "command": "npx",
-      "args": ["-y", "@dan1d/mercadolibre-mcp"]
-    }
-  }
-}
-```
-
-### Windsurf
-
-```json
-{
-  "mcpServers": {
-    "mercadolibre": {
-      "command": "npx",
-      "args": ["-y", "@dan1d/mercadolibre-mcp"]
-    }
-  }
-}
-```
-
-### With authentication (optional)
-
-For endpoints that require auth (future premium features), add your access token:
-
-```json
-{
-  "mcpServers": {
-    "mercadolibre": {
-      "command": "npx",
-      "args": ["-y", "@dan1d/mercadolibre-mcp"],
-      "env": {
-        "MERCADOLIBRE_ACCESS_TOKEN": "APP_USR-..."
-      }
-    }
-  }
-}
-```
-
-> Once configured, ask your AI assistant things like: *"Search for iPhone 15 on MercadoLibre"* or *"What are the trending searches in Argentina?"* or *"Show me details for item MLA1234567890"*
-
----
-
-## Available Tools
-
-| Tool | Description |
-|------|-------------|
-| `search_items` | Search products by keyword. Filter by category, price range, and site (MLA=Argentina, MLB=Brazil, MLM=Mexico, MLC=Chile, MCO=Colombia). |
-| `get_item` | Get full item details: title, price, pictures, seller, condition, stock, and more. |
-| `get_item_description` | Get the full text description of an item. |
-| `get_categories` | List all top-level categories for a MercadoLibre site. |
-| `get_category` | Get category details including name, path from root, and children. |
-| `get_seller_info` | Get seller profile: reputation, ratings, and transaction stats. |
-| `get_trends` | Get current trending searches for a specific site/country. |
-| `get_currency_conversion` | Convert between currencies using MercadoLibre exchange rates (ARS, BRL, MXN, USD, etc.). |
-
----
-
-## Supported Sites
-
-| Site ID | Country |
-|---------|---------|
-| `MLA` | Argentina |
-| `MLB` | Brazil |
-| `MLM` | Mexico |
-| `MLC` | Chile |
-| `MCO` | Colombia |
-| `MLU` | Uruguay |
-| `MPE` | Peru |
-| `MEC` | Ecuador |
-| `MCR` | Costa Rica |
-| `MPA` | Panama |
-| `MLV` | Venezuela |
-| `MRD` | Dominican Republic |
-| `MHN` | Honduras |
-| `MBO` | Bolivia |
-| `MNI` | Nicaragua |
-| `MPY` | Paraguay |
-| `MSV` | El Salvador |
-| `MGT` | Guatemala |
-
----
-
-## Example Prompts
-
-- "Search for PlayStation 5 under $500000 in Argentina"
-- "Show me the details of item MLA1405857684"
-- "What are the trending searches in Brazil?"
-- "List all categories on MercadoLibre Mexico"
-- "Show me the reputation of seller 123456789"
-- "Convert 100 USD to ARS"
-
----
-
-## Programmatic Usage
+## Test
 
 ```bash
-npm install @dan1d/mercadolibre-mcp
+npm test
 ```
-
-```typescript
-import { createMercadoLibreTools } from "@dan1d/mercadolibre-mcp";
-
-const ml = createMercadoLibreTools();
-
-// Search products
-const results = await ml.tools.search_items({
-  query: "iPhone 15",
-  site_id: "MLA",
-  price_max: 2000000,
-  limit: 5,
-});
-
-// Get item details
-const item = await ml.tools.get_item({ item_id: "MLA1405857684" });
-
-// Get trending searches in Argentina
-const trends = await ml.tools.get_trends({ site_id: "MLA" });
-
-// Browse categories
-const categories = await ml.tools.get_categories({ site_id: "MLA" });
-
-// Get seller reputation
-const seller = await ml.tools.get_seller_info({ seller_id: 123456789 });
-
-// Convert currencies
-const conversion = await ml.tools.get_currency_conversion({
-  from: "USD",
-  to: "BRL",
-  amount: 100,
-});
-```
-
----
-
-## Part of the LATAM MCP Toolkit
-
-| Server | What it does |
-|--------|-------------|
-| [CobroYa](https://github.com/dan1d/mercadopago-tool) | Mercado Pago payments — create links, search payments, refunds |
-| **MercadoLibre MCP** | MercadoLibre marketplace — search products, categories, trends |
-| [DolarAPI MCP](https://github.com/dan1d/dolar-mcp) | Argentine exchange rates — blue, oficial, CCL, crypto, conversion |
-
----
 
 ## License
 
-[MIT](./LICENSE) -- by [dan1d](https://dan1d.dev/)
+MIT (mesmo do upstream).
