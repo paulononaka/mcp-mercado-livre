@@ -8,6 +8,8 @@ import type {
   GetSellerInfoParams,
   GetTrendsParams,
   GetCurrencyConversionParams,
+  GetCatalogProductParams,
+  GetCatalogProductItemsParams,
 } from "./schemas.js";
 
 const DEFAULT_SITE_ID = "MLB";
@@ -226,5 +228,109 @@ export async function getCurrencyConversion(
     rate: result.ratio,
     amount,
     converted: Number((amount * result.ratio).toFixed(4)),
+  };
+}
+
+interface RawCatalogProduct {
+  id?: string;
+  name?: string;
+  family_name?: string;
+  domain_id?: string;
+  permalink?: string;
+  short_description?: { content?: string } | string | null;
+  main_features?: Array<{ text?: string } | string>;
+  attributes?: RawAttribute[];
+  pictures?: Array<{ secure_url?: string; url?: string }>;
+  pickers?: Array<{ picker_id?: string; picker_name?: string; products?: Array<{ product_id?: string; picker_label?: string }> }>;
+  release_info?: unknown;
+  date_created?: string;
+  last_updated?: string;
+}
+
+interface RawCatalogItem {
+  item_id?: string;
+  seller_id?: number;
+  price?: number;
+  currency_id?: string;
+  condition?: string;
+  warranty?: string | null;
+  listing_type_id?: string;
+  category_id?: string;
+  accepts_mercadopago?: boolean;
+  tags?: string[];
+  international_delivery_mode?: string;
+}
+
+export async function getCatalogProduct(
+  client: MercadoLibreClient,
+  params: GetCatalogProductParams
+): Promise<unknown> {
+  const raw = await client.get<RawCatalogProduct>(
+    `/products/${encodeURIComponent(params.catalog_id)}`
+  );
+  const attrs = raw.attributes ?? [];
+  const curated = attrs
+    .filter((a) => a.id && KEY_ATTRIBUTE_IDS.has(a.id))
+    .map((a) => ({ id: a.id, name: a.name, value: a.value_name }));
+  const pictures = (raw.pictures ?? [])
+    .slice(0, 3)
+    .map((p) => p.secure_url ?? p.url)
+    .filter((v): v is string => Boolean(v));
+  const features = (raw.main_features ?? [])
+    .map((f) => (typeof f === "string" ? f : f.text ?? ""))
+    .filter((s) => s.length > 0)
+    .slice(0, 10);
+  const shortDesc =
+    typeof raw.short_description === "string"
+      ? raw.short_description
+      : raw.short_description?.content ?? null;
+  const pickers = (raw.pickers ?? []).map((p) => ({
+    id: p.picker_id,
+    name: p.picker_name,
+    variations: (p.products ?? []).length,
+  }));
+  return {
+    id: raw.id,
+    name: raw.name,
+    family_name: raw.family_name,
+    domain_id: raw.domain_id,
+    permalink: raw.permalink || `https://www.mercadolivre.com.br/p/${raw.id}`,
+    short_description: shortDesc,
+    main_features: features,
+    key_attributes: curated,
+    pictures,
+    pickers,
+  };
+}
+
+export async function getCatalogProductItems(
+  client: MercadoLibreClient,
+  params: GetCatalogProductItemsParams
+): Promise<unknown> {
+  const qp: Record<string, string> = {};
+  const limit = Math.min(params.limit ?? 20, 100);
+  qp.limit = String(limit);
+  if (params.offset !== undefined) qp.offset = String(params.offset);
+  const raw = await client.get<{ paging?: Record<string, unknown>; results?: RawCatalogItem[] }>(
+    `/products/${encodeURIComponent(params.catalog_id)}/items`,
+    qp
+  );
+  const results = (raw.results ?? []).map((it) => ({
+    item_id: it.item_id,
+    seller_id: it.seller_id,
+    price: it.price,
+    currency_id: it.currency_id,
+    condition: it.condition,
+    warranty: it.warranty ?? null,
+    listing_type: it.listing_type_id,
+    full_fulfillment: it.listing_type_id === "gold_special" || (it.tags ?? []).includes("brand_verified"),
+    international: it.international_delivery_mode && it.international_delivery_mode !== "none",
+    accepts_mercadopago: it.accepts_mercadopago,
+    tags: it.tags,
+  }));
+  return {
+    catalog_id: params.catalog_id,
+    paging: raw.paging,
+    results,
   };
 }

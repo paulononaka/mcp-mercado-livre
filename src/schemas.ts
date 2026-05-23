@@ -42,6 +42,16 @@ export interface GetCurrencyConversionParams {
   amount?: number;
 }
 
+export interface GetCatalogProductParams {
+  catalog_id: string;
+}
+
+export interface GetCatalogProductItemsParams {
+  catalog_id: string;
+  limit?: number;
+  offset?: number;
+}
+
 export interface OAuthConfig {
   clientId: string;
   clientSecret: string;

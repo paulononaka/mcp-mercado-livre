@@ -22,10 +22,12 @@ describe("public exports", () => {
     expect(typeof getItem).toBe("function");
   });
 
-  it("createMercadoLibreTools retorna 8 tools wired", () => {
+  it("createMercadoLibreTools retorna 10 tools wired", () => {
     const oauth = new OAuthManager({ clientId: "c", clientSecret: "s", accessToken: "t", expiresAt: Date.now() + 60000 });
     const { tools } = createMercadoLibreTools(oauth);
     expect(Object.keys(tools).sort()).toEqual([
+      "get_catalog_product",
+      "get_catalog_product_items",
       "get_categories",
       "get_category",
       "get_currency_conversion",

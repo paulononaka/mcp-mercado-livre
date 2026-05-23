@@ -8,6 +8,8 @@ import {
   getSellerInfo,
   getTrends,
   getCurrencyConversion,
+  getCatalogProduct,
+  getCatalogProductItems,
 } from "../src/actions.js";
 import { MercadoLibreClient } from "../src/client.js";
 import { OAuthManager } from "../src/oauth.js";
@@ -176,5 +178,90 @@ describe("actions", () => {
     globalThis.fetch = mockFetchJson({ ratio: 5 });
     const res = await getCurrencyConversion(client(), { from: "USD", to: "BRL", amount: 10 }) as { converted: number };
     expect(res.converted).toBe(50);
+  });
+
+  it("getCatalogProduct curate attributes whitelist + pictures<=3 + features<=10 + permalink fallback", async () => {
+    const cap: { value?: string } = {};
+    globalThis.fetch = mockFetchJson({
+      id: "MLB1027172667",
+      name: "Apple iPhone 15 128GB Azul",
+      family_name: "Apple iPhone 15",
+      domain_id: "MLB-CELLPHONES",
+      permalink: "",
+      short_description: { content: "Smartphone com cam 48MP." },
+      main_features: Array.from({ length: 15 }, (_, i) => ({ text: `feat ${i}` })),
+      attributes: [
+        { id: "BRAND", name: "Marca", value_name: "Apple" },
+        { id: "MODEL", name: "Modelo", value_name: "iPhone 15" },
+        { id: "COLOR", name: "Cor", value_name: "Azul" },
+        { id: "INTERNAL_TAG_FOO", name: "internal", value_name: "ignored" },
+      ],
+      pictures: Array.from({ length: 8 }, (_, i) => ({ secure_url: `https://p${i}` })),
+      pickers: [{ picker_id: "COLOR", picker_name: "Cor", products: [{ product_id: "x1" }, { product_id: "x2" }] }],
+    }, cap);
+    const res = await getCatalogProduct(client(), { catalog_id: "MLB1027172667" }) as {
+      key_attributes: Array<{ id: string }>;
+      pictures: string[];
+      main_features: string[];
+      permalink: string;
+      short_description: string;
+      pickers: Array<{ id: string; variations: number }>;
+    };
+    expect(cap.value).toContain("/products/MLB1027172667");
+    expect(res.key_attributes.map((a) => a.id)).toEqual(["BRAND", "MODEL", "COLOR"]);
+    expect(res.pictures.length).toBe(3);
+    expect(res.main_features.length).toBe(10);
+    expect(res.permalink).toBe("https://www.mercadolivre.com.br/p/MLB1027172667");
+    expect(res.short_description).toBe("Smartphone com cam 48MP.");
+    expect(res.pickers[0]).toMatchObject({ id: "COLOR", variations: 2 });
+  });
+
+  it("getCatalogProductItems curate sellers + default limit=20 + full_fulfillment flag", async () => {
+    const cap: { value?: string } = {};
+    globalThis.fetch = mockFetchJson({
+      paging: { total: 2, offset: 0, limit: 20 },
+      results: [
+        {
+          item_id: "MLB3793882819",
+          seller_id: 296064033,
+          price: 4999,
+          currency_id: "BRL",
+          condition: "new",
+          warranty: "12 meses",
+          listing_type_id: "gold_special",
+          category_id: "MLB1055",
+          accepts_mercadopago: true,
+          tags: ["good_quality_thumbnail"],
+          international_delivery_mode: "none",
+        },
+        {
+          item_id: "MLB9999",
+          seller_id: 111,
+          price: 5099,
+          currency_id: "BRL",
+          condition: "new",
+          warranty: null,
+          listing_type_id: "gold",
+          accepts_mercadopago: true,
+          tags: [],
+        },
+      ],
+    }, cap);
+    const res = await getCatalogProductItems(client(), { catalog_id: "MLB1027172667" }) as {
+      catalog_id: string;
+      results: Array<{ full_fulfillment: boolean; seller_id: number; price: number; warranty: string | null }>;
+    };
+    expect(cap.value).toContain("/products/MLB1027172667/items");
+    expect(cap.value).toContain("limit=20");
+    expect(res.catalog_id).toBe("MLB1027172667");
+    expect(res.results[0]).toMatchObject({ seller_id: 296064033, price: 4999, full_fulfillment: true });
+    expect(res.results[1]).toMatchObject({ seller_id: 111, price: 5099, full_fulfillment: false, warranty: null });
+  });
+
+  it("getCatalogProductItems respeita limit max 100", async () => {
+    const cap: { value?: string } = {};
+    globalThis.fetch = mockFetchJson({ paging: {}, results: [] }, cap);
+    await getCatalogProductItems(client(), { catalog_id: "MLB1", limit: 9999 });
+    expect(cap.value).toContain("limit=100");
   });
 });

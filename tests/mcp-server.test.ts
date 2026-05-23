@@ -12,9 +12,11 @@ function fakeOAuth(): OAuthManager {
 }
 
 describe("TOOL_DEFINITIONS", () => {
-  it("expoe exatamente 8 tools com nomes esperados", () => {
+  it("expoe exatamente 10 tools com nomes esperados", () => {
     const names = TOOL_DEFINITIONS.map((t) => t.name).sort();
     expect(names).toEqual([
+      "get_catalog_product",
+      "get_catalog_product_items",
       "get_categories",
       "get_category",
       "get_currency_conversion",
@@ -43,6 +45,8 @@ describe("TOOL_DEFINITIONS", () => {
       get_category: ["category_id"],
       get_seller_info: ["seller_id"],
       get_currency_conversion: ["from", "to"],
+      get_catalog_product: ["catalog_id"],
+      get_catalog_product_items: ["catalog_id"],
     };
     for (const [name, required] of Object.entries(expected)) {
       const t = TOOL_DEFINITIONS.find((x) => x.name === name);

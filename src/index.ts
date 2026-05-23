@@ -9,6 +9,8 @@ import {
   getSellerInfo,
   getTrends,
   getCurrencyConversion,
+  getCatalogProduct,
+  getCatalogProductItems,
 } from "./actions.js";
 import type {
   SearchItemsParams,
@@ -19,6 +21,8 @@ import type {
   GetSellerInfoParams,
   GetTrendsParams,
   GetCurrencyConversionParams,
+  GetCatalogProductParams,
+  GetCatalogProductItemsParams,
 } from "./schemas.js";
 
 export function createMercadoLibreTools(oauth: OAuthManager) {
@@ -34,6 +38,8 @@ export function createMercadoLibreTools(oauth: OAuthManager) {
       get_seller_info: (params: GetSellerInfoParams) => getSellerInfo(client, params),
       get_trends: (params?: GetTrendsParams) => getTrends(client, params),
       get_currency_conversion: (params: GetCurrencyConversionParams) => getCurrencyConversion(client, params),
+      get_catalog_product: (params: GetCatalogProductParams) => getCatalogProduct(client, params),
+      get_catalog_product_items: (params: GetCatalogProductItemsParams) => getCatalogProductItems(client, params),
     },
   };
 }
@@ -50,6 +56,8 @@ export {
   getSellerInfo,
   getTrends,
   getCurrencyConversion,
+  getCatalogProduct,
+  getCatalogProductItems,
 } from "./actions.js";
 export type {
   SearchItemsParams,
@@ -60,6 +68,8 @@ export type {
   GetSellerInfoParams,
   GetTrendsParams,
   GetCurrencyConversionParams,
+  GetCatalogProductParams,
+  GetCatalogProductItemsParams,
   OAuthConfig,
   TokenCache,
 } from "./schemas.js";

@@ -11,6 +11,8 @@ import type {
   GetSellerInfoParams,
   GetTrendsParams,
   GetCurrencyConversionParams,
+  GetCatalogProductParams,
+  GetCatalogProductItemsParams,
 } from "./schemas.js";
 
 const SEARCH_ITEMS_TOOL: Tool = {
@@ -107,6 +109,32 @@ const GET_CURRENCY_CONVERSION_TOOL: Tool = {
   },
 };
 
+const GET_CATALOG_PRODUCT_TOOL: Tool = {
+  name: "get_catalog_product",
+  description: "Metadata canonica de um produto do catalogo ML (URL formato .../p/MLB<id>). Retorna name, family_name, key_attributes curados (BRAND/MODEL/VOLTAGE/COLOR/etc), main_features (max 10), pictures (max 3), permalink, pickers (variacoes color/voltage/etc). USE QUANDO: URL do Google retorna .../p/MLB... ou /products/MLB...",
+  inputSchema: {
+    type: "object",
+    properties: {
+      catalog_id: { type: "string", description: "Catalog product ID (ex: MLB1027172667)" },
+    },
+    required: ["catalog_id"],
+  },
+};
+
+const GET_CATALOG_PRODUCT_ITEMS_TOOL: Tool = {
+  name: "get_catalog_product_items",
+  description: "Lista TODOS os sellers que vendem aquele produto do catalogo, com price/condition/warranty/listing_type/full_fulfillment. Default limit=20 (max 100). Pareie com get_seller_info pra reputacao. USE QUANDO: quer comparar precos entre sellers do MESMO produto canonico.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      catalog_id: { type: "string", description: "Catalog product ID (ex: MLB1027172667)" },
+      limit: { type: "number", description: "Max sellers a retornar (default 20, max 100)" },
+      offset: { type: "number", description: "Pagination offset" },
+    },
+    required: ["catalog_id"],
+  },
+};
+
 export const TOOL_DEFINITIONS: Tool[] = [
   SEARCH_ITEMS_TOOL,
   GET_ITEM_TOOL,
@@ -116,6 +144,8 @@ export const TOOL_DEFINITIONS: Tool[] = [
   GET_SELLER_INFO_TOOL,
   GET_TRENDS_TOOL,
   GET_CURRENCY_CONVERSION_TOOL,
+  GET_CATALOG_PRODUCT_TOOL,
+  GET_CATALOG_PRODUCT_ITEMS_TOOL,
 ];
 
 type ToolResult = {
@@ -163,6 +193,10 @@ export function createMcpServer(oauth: OAuthManager): Server {
         return wrap(() => tools.get_trends(args as unknown as GetTrendsParams));
       case "get_currency_conversion":
         return wrap(() => tools.get_currency_conversion(args as unknown as GetCurrencyConversionParams));
+      case "get_catalog_product":
+        return wrap(() => tools.get_catalog_product(args as unknown as GetCatalogProductParams));
+      case "get_catalog_product_items":
+        return wrap(() => tools.get_catalog_product_items(args as unknown as GetCatalogProductItemsParams));
       default:
         return {
           content: [{ type: "text", text: `Tool desconhecido: ${name}` }],
