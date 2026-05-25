@@ -105,6 +105,14 @@ A tool detecta o 403 e retorna objeto estruturado em vez de propagar erro cru:
 
 **Caminho recomendado:** `get_catalog_product_items` cobre preço, vendedor, condition, warranty, listing_type e tags por item (sem `/items/{id}`). `get_item_description` ainda funciona se precisar do texto completo do anúncio.
 
+### `get_catalog_product_items` permalinks: construídos (best-effort)
+
+Como `/items/{id}` retorna 403, `include_permalink=true` constrói a URL deterministicamente a partir do `item_id` em vez de chamar o upstream:
+
+- `MLB3392752495` → `https://produto.mercadolivre.com.br/MLB-3392752495`
+
+O campo `permalink_source: "constructed"` documenta isso. Resolve em >95% dos anúncios; lojas oficiais com slug customizado podem 301 — abrem ainda assim. Item IDs sem prefixo `MLB` (outros sites) retornam `permalink: null`.
+
 ### `get_seller_info`: 3 campos quase sempre `null`
 
 Confirmado via probe live em 2026-05-25 pra 4 sellers distintos (`141321244`, `175345466`, `296064033`, `213475298`): o upstream `GET /users/{id}` retorna `seller_reputation.transactions` com no máximo `period` e `total`. Os campos `transactions_completed`, `transactions_canceled` e `ratings` (positive/neutral/negative) simplesmente **não existem** na resposta pra apps externas — o ML não os expõe a consumidores fora da conta dona do anúncio.

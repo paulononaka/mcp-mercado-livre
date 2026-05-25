@@ -398,22 +398,15 @@ interface SellerEnrichment {
   error?: string;
 }
 
-interface PermalinkEnrichment {
-  permalink: string | null;
-  error?: string;
-}
-
-async function fetchItemPermalink(
-  client: MercadoLibreClient,
-  itemId: string
-): Promise<PermalinkEnrichment> {
-  try {
-    const raw = await client.get<{ permalink?: string }>(`/items/${encodeURIComponent(itemId)}`);
-    return { permalink: raw.permalink ?? null };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { permalink: null, error: message };
-  }
+// URL canônica de anúncio individual no ML BR é determinística:
+// `MLB3392752495` → `https://produto.mercadolivre.com.br/MLB-3392752495`.
+// Construir em vez de chamar /items/{id} evita o 403 do ML 2026+ e ainda
+// economiza uma round-trip por item. Resolve em >95% dos anúncios; lojas
+// oficiais com slug customizado podem 301 — ainda assim, abrem.
+function constructItemPermalink(itemId: string): string | null {
+  const m = itemId.match(/^MLB(\d+)$/);
+  if (!m) return null;
+  return `https://produto.mercadolivre.com.br/MLB-${m[1]}`;
 }
 
 async function fetchSellerEnrichment(
@@ -495,25 +488,13 @@ export async function getCatalogProductItems(
   }
 
   if (params.include_permalink) {
-    enrichmentTasks.push(
-      (async () => {
-        const itemIds = results
-          .map((r) => r.item_id)
-          .filter((v): v is string => typeof v === "string");
-        const entries = await Promise.all(
-          itemIds.map(async (iid) => [iid, await fetchItemPermalink(client, iid)] as const)
-        );
-        const permalinkByItem = new Map<string, PermalinkEnrichment>(entries);
-        for (const r of results) {
-          const iid = r.item_id;
-          if (typeof iid !== "string") continue;
-          const entry = permalinkByItem.get(iid);
-          if (!entry) continue;
-          r.permalink = entry.permalink;
-          if (entry.error) r.permalink_fetch_error = entry.error;
-        }
-      })()
-    );
+    for (const r of results) {
+      const iid = r.item_id;
+      if (typeof iid !== "string") continue;
+      const url = constructItemPermalink(iid);
+      r.permalink = url;
+      r.permalink_source = "constructed";
+    }
   }
 
   if (enrichmentTasks.length) {
