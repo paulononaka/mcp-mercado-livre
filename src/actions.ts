@@ -333,6 +333,24 @@ interface SellerEnrichment {
   error?: string;
 }
 
+interface PermalinkEnrichment {
+  permalink: string | null;
+  error?: string;
+}
+
+async function fetchItemPermalink(
+  client: MercadoLibreClient,
+  itemId: string
+): Promise<PermalinkEnrichment> {
+  try {
+    const raw = await client.get<{ permalink?: string }>(`/items/${encodeURIComponent(itemId)}`);
+    return { permalink: raw.permalink ?? null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { permalink: null, error: message };
+  }
+}
+
 async function fetchSellerEnrichment(
   client: MercadoLibreClient,
   sellerId: number
@@ -382,6 +400,8 @@ export async function getCatalogProductItems(
     tags: it.tags,
   }));
 
+  const enrichmentTasks: Array<Promise<unknown>> = [];
+
   if (params.enrich_seller) {
     const uniqueSellerIds = Array.from(
       new Set(
@@ -390,18 +410,48 @@ export async function getCatalogProductItems(
           .filter((v): v is number => typeof v === "number")
       )
     );
-    const entries = await Promise.all(
-      uniqueSellerIds.map(async (sid) => [sid, await fetchSellerEnrichment(client, sid)] as const)
+    enrichmentTasks.push(
+      (async () => {
+        const entries = await Promise.all(
+          uniqueSellerIds.map(async (sid) => [sid, await fetchSellerEnrichment(client, sid)] as const)
+        );
+        const enrichmentBySeller = new Map<number, SellerEnrichment>(entries);
+        for (const r of results) {
+          const sid = r.seller_id;
+          if (typeof sid !== "number") continue;
+          const entry = enrichmentBySeller.get(sid);
+          if (!entry) continue;
+          r.seller = entry.seller;
+          if (entry.error) r.seller_fetch_error = entry.error;
+        }
+      })()
     );
-    const enrichmentBySeller = new Map<number, SellerEnrichment>(entries);
-    for (const r of results) {
-      const sid = r.seller_id;
-      if (typeof sid !== "number") continue;
-      const entry = enrichmentBySeller.get(sid);
-      if (!entry) continue;
-      r.seller = entry.seller;
-      if (entry.error) r.seller_fetch_error = entry.error;
-    }
+  }
+
+  if (params.include_permalink) {
+    enrichmentTasks.push(
+      (async () => {
+        const itemIds = results
+          .map((r) => r.item_id)
+          .filter((v): v is string => typeof v === "string");
+        const entries = await Promise.all(
+          itemIds.map(async (iid) => [iid, await fetchItemPermalink(client, iid)] as const)
+        );
+        const permalinkByItem = new Map<string, PermalinkEnrichment>(entries);
+        for (const r of results) {
+          const iid = r.item_id;
+          if (typeof iid !== "string") continue;
+          const entry = permalinkByItem.get(iid);
+          if (!entry) continue;
+          r.permalink = entry.permalink;
+          if (entry.error) r.permalink_fetch_error = entry.error;
+        }
+      })()
+    );
+  }
+
+  if (enrichmentTasks.length) {
+    await Promise.all(enrichmentTasks);
   }
 
   return {

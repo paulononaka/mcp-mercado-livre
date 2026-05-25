@@ -374,6 +374,116 @@ describe("actions", () => {
     expect(res.results[0].seller?.transactions_total).toBe(1000);
   });
 
+  it("getCatalogProductItems include_permalink=true anexa permalink por item via /items/{id}", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("/products/") && url.includes("/items")) {
+        return new Response(JSON.stringify({
+          paging: { total: 2 },
+          results: [
+            { item_id: "MLB1111", seller_id: 11, price: 100, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] },
+            { item_id: "MLB2222", seller_id: 22, price: 110, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] },
+          ],
+        }), { status: 200 });
+      }
+      if (url.includes("/items/MLB1111")) {
+        return new Response(JSON.stringify({ id: "MLB1111", permalink: "https://produto.mercadolivre.com.br/MLB-1111-x" }), { status: 200 });
+      }
+      if (url.includes("/items/MLB2222")) {
+        return new Response(JSON.stringify({ id: "MLB2222", permalink: "https://produto.mercadolivre.com.br/MLB-2222-y" }), { status: 200 });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+    const res = await getCatalogProductItems(client(), {
+      catalog_id: "MLB1027172667",
+      include_permalink: true,
+    }) as { results: Array<{ item_id: string; permalink: string | null }> };
+    const itemCalls = urls.filter((u) => u.match(/\/items\/MLB\d+/));
+    expect(itemCalls).toHaveLength(2);
+    expect(res.results[0].permalink).toBe("https://produto.mercadolivre.com.br/MLB-1111-x");
+    expect(res.results[1].permalink).toBe("https://produto.mercadolivre.com.br/MLB-2222-y");
+  });
+
+  it("getCatalogProductItems include_permalink=false (default) NÃO chama /items", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      urls.push(url);
+      return new Response(JSON.stringify({
+        paging: { total: 1 },
+        results: [{ item_id: "MLB1", seller_id: 11, price: 100, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] }],
+      }), { status: 200 });
+    }) as typeof fetch;
+    const res = await getCatalogProductItems(client(), { catalog_id: "MLB1027172667" }) as {
+      results: Array<Record<string, unknown>>;
+    };
+    expect(urls.filter((u) => u.match(/\/items\/MLB\d+/))).toHaveLength(0);
+    expect(res.results[0]).not.toHaveProperty("permalink");
+  });
+
+  it("getCatalogProductItems include_permalink=true: falha em UM item não derruba a request", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/products/") && url.includes("/items")) {
+        return new Response(JSON.stringify({
+          paging: { total: 2 },
+          results: [
+            { item_id: "MLB1111", seller_id: 11, price: 100, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] },
+            { item_id: "MLB2222", seller_id: 22, price: 110, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] },
+          ],
+        }), { status: 200 });
+      }
+      if (url.includes("/items/MLB1111")) {
+        return new Response(JSON.stringify({ id: "MLB1111", permalink: "https://produto.mercadolivre.com.br/MLB-1111-x" }), { status: 200 });
+      }
+      if (url.includes("/items/MLB2222")) {
+        return new Response("not found", { status: 404 });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+    const res = await getCatalogProductItems(client(), {
+      catalog_id: "MLB1",
+      include_permalink: true,
+    }) as { results: Array<{ item_id: string; permalink: string | null; permalink_fetch_error?: string }> };
+    expect(res.results[0].permalink).toBe("https://produto.mercadolivre.com.br/MLB-1111-x");
+    expect(res.results[1].permalink).toBeNull();
+    expect(res.results[1].permalink_fetch_error).toMatch(/404/);
+  });
+
+  it("getCatalogProductItems enrich_seller=true + include_permalink=true rodam em paralelo (1 round-trip)", async () => {
+    let maxConcurrent = 0;
+    let inflight = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/products/") && url.includes("/items")) {
+        return new Response(JSON.stringify({
+          paging: { total: 1 },
+          results: [{ item_id: "MLB1", seller_id: 11, price: 100, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] }],
+        }), { status: 200 });
+      }
+      inflight += 1;
+      maxConcurrent = Math.max(maxConcurrent, inflight);
+      await new Promise((r) => setTimeout(r, 15));
+      inflight -= 1;
+      if (url.includes("/users/")) {
+        return new Response(JSON.stringify({ id: 11, nickname: "S", seller_reputation: { level_id: "5_green", transactions: { total: 100 } } }), { status: 200 });
+      }
+      if (url.includes("/items/MLB")) {
+        return new Response(JSON.stringify({ id: "MLB1", permalink: "https://x" }), { status: 200 });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+    await getCatalogProductItems(client(), {
+      catalog_id: "MLB1",
+      enrich_seller: true,
+      include_permalink: true,
+    });
+    // /users/11 e /items/MLB1 devem rodar concorrentemente quando ambas as flags estão ligadas
+    expect(maxConcurrent).toBe(2);
+  });
+
   it("getCatalogProductItems enrich_seller=true: falha em UM seller não derruba a request", async () => {
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
