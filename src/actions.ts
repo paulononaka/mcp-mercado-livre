@@ -1,4 +1,5 @@
 import { MercadoLibreClient } from "./client.js";
+import { MercadoLibreError } from "./errors.js";
 import type {
   SearchItemsParams,
   GetItemParams,
@@ -96,10 +97,25 @@ export async function searchItems(
   const limit = Math.min(params.limit ?? DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT);
   qp.limit = String(limit);
   if (params.offset !== undefined) qp.offset = String(params.offset);
-  const raw = await client.get<{ paging?: Record<string, unknown>; results?: RawSearchItem[] }>(
-    `/sites/${encodeURIComponent(siteId)}/search`,
-    qp
-  );
+  let raw: { paging?: Record<string, unknown>; results?: RawSearchItem[] };
+  try {
+    raw = await client.get<{ paging?: Record<string, unknown>; results?: RawSearchItem[] }>(
+      `/sites/${encodeURIComponent(siteId)}/search`,
+      qp
+    );
+  } catch (err) {
+    if (err instanceof MercadoLibreError && err.isForbidden) {
+      return {
+        error: "search_endpoint_restricted",
+        message:
+          "ML restringiu /sites/MLB/search desde 2025 para apps não-aprovadas. Use busca externa (Google, web_search) para descobrir o catalog_id (formato MLB...), depois consulte via get_catalog_product, get_catalog_product_items ou get_item.",
+        upstream_status: 403,
+        fallback_tools: ["get_catalog_product", "get_catalog_product_items", "get_item"],
+        docs: "https://developers.mercadolivre.com.br/",
+      };
+    }
+    throw err;
+  }
   const results = (raw.results ?? []).map((it) => ({
     id: it.id,
     title: it.title,

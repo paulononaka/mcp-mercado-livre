@@ -94,6 +94,42 @@ describe("actions", () => {
     expect(cap.value).toContain("limit=50");
   });
 
+  it("searchItems 403 do upstream vira objeto estruturado (search_endpoint_restricted)", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ message: "forbidden", error: "forbidden", status: 403, cause: [] }),
+        { status: 403 }
+      )) as typeof fetch;
+    const res = await searchItems(client(), { query: "qualquer coisa" }) as {
+      error: string;
+      upstream_status: number;
+      fallback_tools: string[];
+      message: string;
+    };
+    expect(res.error).toBe("search_endpoint_restricted");
+    expect(res.upstream_status).toBe(403);
+    expect(res.fallback_tools).toEqual([
+      "get_catalog_product",
+      "get_catalog_product_items",
+      "get_item",
+    ]);
+    expect(res.message).toMatch(/get_catalog_product/);
+  });
+
+  it("searchItems 401 NÃO é confundido com 403 — propaga como erro (e não devolve search_endpoint_restricted)", async () => {
+    // OAuthManager sem refresh_token → forceRefresh lança antes mesmo de retry.
+    // O importante aqui é garantir que 401 NÃO seja silenciosamente convertido em search_endpoint_restricted.
+    globalThis.fetch = (async () =>
+      new Response("{\"message\":\"unauthorized\"}", { status: 401 })) as typeof fetch;
+    await expect(searchItems(client(), { query: "x" })).rejects.toThrow();
+  });
+
+  it("searchItems 429 propaga como erro (não cai no fallback de 403)", async () => {
+    globalThis.fetch = (async () =>
+      new Response("{\"message\":\"too many requests\"}", { status: 429 })) as typeof fetch;
+    await expect(searchItems(client(), { query: "x" })).rejects.toThrow(/failed \(429\)/);
+  });
+
   it("getItem extrai apenas key_attributes (VOLTAGE, BRAND, etc) e trunca pictures a 5", async () => {
     globalThis.fetch = mockFetchJson({
       id: "MLB99",

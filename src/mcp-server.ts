@@ -17,7 +17,7 @@ import type {
 
 const SEARCH_ITEMS_TOOL: Tool = {
   name: "search_items",
-  description: "Busca produtos no MercadoLibre por palavra-chave. Default site_id=MLB (Brasil). Filtros: category, price_min/max, condition (new/used), free_shipping, sort (relevance|price_asc|price_desc), seller_id. Retorna lista curada (max 50, default 10) com price/condition/seller/free_shipping/permalink.",
+  description: "Busca produtos no MercadoLibre por palavra-chave. ATENÇÃO: o ML restringiu /sites/MLB/search desde 2025 — apps não-aprovadas recebem 403 e a tool devolve {error:'search_endpoint_restricted', fallback_tools:[...]}. Caminho recomendado: usar busca externa (web_search/Google) com `site:mercadolivre.com.br` pra descobrir o catalog_id (formato MLB...), depois chamar get_catalog_product, get_catalog_product_items ou get_item. Default site_id=MLB. Filtros: category, price_min/max, condition (new/used), free_shipping, sort (relevance|price_asc|price_desc), seller_id. Retorna lista curada (max 50, default 10) quando o endpoint responde 200.",
   inputSchema: {
     type: "object",
     properties: {
