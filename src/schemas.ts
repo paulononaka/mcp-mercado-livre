@@ -50,6 +50,8 @@ export interface GetCatalogProductItemsParams {
   catalog_id: string;
   limit?: number;
   offset?: number;
+  enrich_seller?: boolean;
+  include_permalink?: boolean;
 }
 
 export interface OAuthConfig {

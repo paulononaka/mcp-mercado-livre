@@ -123,13 +123,15 @@ const GET_CATALOG_PRODUCT_TOOL: Tool = {
 
 const GET_CATALOG_PRODUCT_ITEMS_TOOL: Tool = {
   name: "get_catalog_product_items",
-  description: "Lista TODOS os sellers que vendem aquele produto do catalogo, com price/condition/warranty/listing_type/full_fulfillment. Default limit=20 (max 100). Pareie com get_seller_info pra reputacao. USE QUANDO: quer comparar precos entre sellers do MESMO produto canonico.",
+  description: "Lista TODOS os sellers que vendem aquele produto do catalogo, com price/condition/warranty/listing_type/full_fulfillment. Default limit=20 (max 100). USE QUANDO: quer comparar precos entre sellers do MESMO produto canonico. Use enrich_seller=true pra incluir reputation/transactions/permalink inline (chamadas paralelas a /users/{seller_id}; evita N+1 get_seller_info quando voce ja precisa avaliar reputacao). Tags conhecidas em cada item: cart_eligible (compra via carrinho), immediate_payment (pagamento obrigatorio no checkout), brand_verified (loja oficial verificada), good_quality_thumbnail (ML validou imagem principal), standard_price_by_quantity (preco escalonado por volume), kvs_primary (anuncio principal do produto na busca), dynamic_standard_price (preco dinamico), has_published_clips (videos), user_product_unify (anuncio unificado), best_seller_candidate (forte candidato a destaque), incomplete_technical_specs (atributos faltando), supermarket_eligible (elegivel mercado online).",
   inputSchema: {
     type: "object",
     properties: {
       catalog_id: { type: "string", description: "Catalog product ID (ex: MLB1027172667)" },
       limit: { type: "number", description: "Max sellers a retornar (default 20, max 100)" },
       offset: { type: "number", description: "Pagination offset" },
+      enrich_seller: { type: "boolean", description: "Se true, anexa objeto seller (nickname, reputation_level, power_seller_status, transactions_total, permalink) em cada item via chamadas paralelas. Falha em um seller especifico deixa seller:null + seller_fetch_error. Default false." },
+      include_permalink: { type: "boolean", description: "Se true, anexa campo permalink em cada item via chamadas paralelas a /items/{item_id}. Default false." },
     },
     required: ["catalog_id"],
   },

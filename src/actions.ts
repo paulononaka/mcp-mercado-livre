@@ -319,6 +319,43 @@ export async function getCatalogProduct(
   };
 }
 
+interface CuratedSeller {
+  id: number | undefined;
+  nickname: string | null;
+  reputation_level: string | null;
+  power_seller_status: string | null;
+  transactions_total: number | null;
+  permalink: string | null;
+}
+
+interface SellerEnrichment {
+  seller: CuratedSeller | null;
+  error?: string;
+}
+
+async function fetchSellerEnrichment(
+  client: MercadoLibreClient,
+  sellerId: number
+): Promise<SellerEnrichment> {
+  try {
+    const raw = await client.get<RawSeller>(`/users/${encodeURIComponent(String(sellerId))}`);
+    const rep = raw.seller_reputation;
+    return {
+      seller: {
+        id: raw.id,
+        nickname: raw.nickname ?? null,
+        reputation_level: rep?.level_id ?? null,
+        power_seller_status: rep?.power_seller_status ?? null,
+        transactions_total: rep?.transactions?.total ?? null,
+        permalink: raw.permalink ?? null,
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { seller: null, error: message };
+  }
+}
+
 export async function getCatalogProductItems(
   client: MercadoLibreClient,
   params: GetCatalogProductItemsParams
@@ -331,7 +368,7 @@ export async function getCatalogProductItems(
     `/products/${encodeURIComponent(params.catalog_id)}/items`,
     qp
   );
-  const results = (raw.results ?? []).map((it) => ({
+  const results: Array<Record<string, unknown>> = (raw.results ?? []).map((it) => ({
     item_id: it.item_id,
     seller_id: it.seller_id,
     price: it.price,
@@ -344,6 +381,29 @@ export async function getCatalogProductItems(
     accepts_mercadopago: it.accepts_mercadopago,
     tags: it.tags,
   }));
+
+  if (params.enrich_seller) {
+    const uniqueSellerIds = Array.from(
+      new Set(
+        results
+          .map((r) => r.seller_id)
+          .filter((v): v is number => typeof v === "number")
+      )
+    );
+    const entries = await Promise.all(
+      uniqueSellerIds.map(async (sid) => [sid, await fetchSellerEnrichment(client, sid)] as const)
+    );
+    const enrichmentBySeller = new Map<number, SellerEnrichment>(entries);
+    for (const r of results) {
+      const sid = r.seller_id;
+      if (typeof sid !== "number") continue;
+      const entry = enrichmentBySeller.get(sid);
+      if (!entry) continue;
+      r.seller = entry.seller;
+      if (entry.error) r.seller_fetch_error = entry.error;
+    }
+  }
+
   return {
     catalog_id: params.catalog_id,
     paging: raw.paging,

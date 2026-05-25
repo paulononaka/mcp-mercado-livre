@@ -300,4 +300,109 @@ describe("actions", () => {
     await getCatalogProductItems(client(), { catalog_id: "MLB1", limit: 9999 });
     expect(cap.value).toContain("limit=100");
   });
+
+  it("getCatalogProductItems enrich_seller=false (default) NÃO chama /users e mantém shape antigo", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("/products/") && url.includes("/items")) {
+        return new Response(JSON.stringify({
+          paging: { total: 2 },
+          results: [
+            { item_id: "MLB1", seller_id: 11, price: 100, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] },
+            { item_id: "MLB2", seller_id: 22, price: 110, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] },
+          ],
+        }), { status: 200 });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+    const res = await getCatalogProductItems(client(), { catalog_id: "MLB1027172667" }) as {
+      results: Array<Record<string, unknown>>;
+    };
+    expect(res.results[0]).not.toHaveProperty("seller");
+    expect(urls.filter((u) => u.includes("/users/"))).toHaveLength(0);
+  });
+
+  it("getCatalogProductItems enrich_seller=true anexa seller inline (paralelo, 1 call por seller único)", async () => {
+    const urls: string[] = [];
+    let parallelCounter = 0;
+    let maxParallel = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("/products/") && url.includes("/items")) {
+        return new Response(JSON.stringify({
+          paging: { total: 3 },
+          results: [
+            { item_id: "MLB1", seller_id: 11, price: 100, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] },
+            { item_id: "MLB2", seller_id: 22, price: 110, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] },
+            { item_id: "MLB3", seller_id: 11, price: 120, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] },
+          ],
+        }), { status: 200 });
+      }
+      if (url.includes("/users/")) {
+        parallelCounter += 1;
+        maxParallel = Math.max(maxParallel, parallelCounter);
+        await new Promise((r) => setTimeout(r, 10));
+        parallelCounter -= 1;
+        const sid = url.match(/\/users\/(\d+)/)?.[1];
+        return new Response(JSON.stringify({
+          id: Number(sid),
+          nickname: `STORE_${sid}`,
+          permalink: `http://perfil.mercadolivre.com.br/STORE_${sid}`,
+          seller_reputation: {
+            level_id: "5_green",
+            power_seller_status: "platinum",
+            transactions: { total: 1000 },
+          },
+        }), { status: 200 });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+    const res = await getCatalogProductItems(client(), {
+      catalog_id: "MLB1027172667",
+      enrich_seller: true,
+    }) as { results: Array<{ seller_id: number; seller: { nickname: string; reputation_level: string; transactions_total: number; permalink: string } | null }> };
+    const userCalls = urls.filter((u) => u.includes("/users/"));
+    expect(userCalls).toHaveLength(2); // só 2 sellers únicos (11 e 22), apesar de 3 items
+    expect(maxParallel).toBe(2); // chamadas concorrentes, não em série
+    expect(res.results[0].seller?.nickname).toBe("STORE_11");
+    expect(res.results[1].seller?.nickname).toBe("STORE_22");
+    expect(res.results[2].seller?.nickname).toBe("STORE_11"); // mesmo seller que [0]
+    expect(res.results[0].seller?.reputation_level).toBe("5_green");
+    expect(res.results[0].seller?.transactions_total).toBe(1000);
+  });
+
+  it("getCatalogProductItems enrich_seller=true: falha em UM seller não derruba a request", async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/products/") && url.includes("/items")) {
+        return new Response(JSON.stringify({
+          paging: { total: 2 },
+          results: [
+            { item_id: "MLB1", seller_id: 11, price: 100, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] },
+            { item_id: "MLB2", seller_id: 99, price: 110, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] },
+          ],
+        }), { status: 200 });
+      }
+      if (url.includes("/users/99")) {
+        return new Response("server error", { status: 500 });
+      }
+      if (url.includes("/users/11")) {
+        return new Response(JSON.stringify({
+          id: 11, nickname: "STORE_11", permalink: "http://x",
+          seller_reputation: { level_id: "5_green", transactions: { total: 500 } },
+        }), { status: 200 });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    }) as typeof fetch;
+    const res = await getCatalogProductItems(client(), {
+      catalog_id: "MLB1",
+      enrich_seller: true,
+    }) as { results: Array<{ seller_id: number; seller: unknown; seller_fetch_error?: string }> };
+    expect(res.results[0].seller).toMatchObject({ nickname: "STORE_11" });
+    expect(res.results[1].seller).toBeNull();
+    expect(res.results[1].seller_fetch_error).toMatch(/500/);
+  });
 });
