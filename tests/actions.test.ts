@@ -162,6 +162,38 @@ describe("actions", () => {
     expect(res.pictures[0]).toBe("https://p0");
   });
 
+  it("getItem 403 do upstream vira objeto estruturado (item_endpoint_restricted)", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ message: "Access to the requested resource is forbidden", error: "access_denied", status: 403, cause: null }),
+        { status: 403 }
+      )) as typeof fetch;
+    const res = await getItem(client(), { item_id: "MLB3392752495" }) as {
+      error: string;
+      upstream_status: number;
+      item_id: string;
+      fallback_tools: string[];
+      message: string;
+    };
+    expect(res.error).toBe("item_endpoint_restricted");
+    expect(res.upstream_status).toBe(403);
+    expect(res.item_id).toBe("MLB3392752495");
+    expect(res.fallback_tools).toEqual(["get_catalog_product_items", "get_item_description"]);
+    expect(res.message).toMatch(/get_catalog_product_items/);
+  });
+
+  it("getItem 404 propaga como erro (não cai no fallback de 403)", async () => {
+    globalThis.fetch = (async () =>
+      new Response("{\"message\":\"item not found\"}", { status: 404 })) as typeof fetch;
+    await expect(getItem(client(), { item_id: "MLB999" })).rejects.toThrow(/failed \(404\)/);
+  });
+
+  it("getItem 500 propaga como erro (não cai no fallback de 403)", async () => {
+    globalThis.fetch = (async () =>
+      new Response("oops", { status: 500 })) as typeof fetch;
+    await expect(getItem(client(), { item_id: "MLB999" })).rejects.toThrow(/failed \(500\)/);
+  });
+
   it("getItemDescription retorna plain_text", async () => {
     globalThis.fetch = mockFetchJson({ plain_text: "Descricao longa.", last_updated: "2026-01-01T00:00:00Z" });
     const res = await getItemDescription(client(), { item_id: "MLB1" }) as { plain_text: string };

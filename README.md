@@ -86,6 +86,25 @@ A tool detecta o 403 e retorna objeto estruturado em vez de propagar erro cru:
 
 **Caminho recomendado:** usar busca externa (`web_search` ou Google `site:mercadolivre.com.br`) pra descobrir o `catalog_id` (formato `MLB...`), depois consultar via `get_catalog_product` + `get_catalog_product_items` (com `enrich_seller=true` e `include_permalink=true` se precisar de reputação/URL inline).
 
+### `get_item` retorna 403 desde 2026
+
+Em maio/2026 o ML estendeu a restrição que aplicou em `/sites/MLB/search` (2025) também pro endpoint `/items/{id}`. Probe live 2026-05-25 confirmou 403 com `access_denied` em todos os items testados, mesmo com OAuth + escopo válidos.
+
+A tool detecta o 403 e retorna objeto estruturado em vez de propagar erro cru:
+
+```json
+{
+  "error": "item_endpoint_restricted",
+  "message": "ML restringiu /items/{id} para apps não-aprovadas. Os dados disponíveis sem este endpoint são preço, vendedor, condition, warranty, listing_type e tags (via get_catalog_product_items). Para descrição completa, use get_item_description que ainda funciona.",
+  "upstream_status": 403,
+  "item_id": "MLB...",
+  "fallback_tools": ["get_catalog_product_items", "get_item_description"],
+  "docs": "https://developers.mercadolivre.com.br/"
+}
+```
+
+**Caminho recomendado:** `get_catalog_product_items` cobre preço, vendedor, condition, warranty, listing_type e tags por item (sem `/items/{id}`). `get_item_description` ainda funciona se precisar do texto completo do anúncio.
+
 ### `get_seller_info`: 3 campos quase sempre `null`
 
 Confirmado via probe live em 2026-05-25 pra 4 sellers distintos (`141321244`, `175345466`, `296064033`, `213475298`): o upstream `GET /users/{id}` retorna `seller_reputation.transactions` com no máximo `period` e `total`. Os campos `transactions_completed`, `transactions_canceled` e `ratings` (positive/neutral/negative) simplesmente **não existem** na resposta pra apps externas — o ML não os expõe a consumidores fora da conta dona do anúncio.

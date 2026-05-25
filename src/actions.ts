@@ -182,9 +182,25 @@ export async function getItem(
   client: MercadoLibreClient,
   params: GetItemParams
 ): Promise<unknown> {
-  const raw = await client.get<Record<string, unknown>>(
-    `/items/${encodeURIComponent(params.item_id)}`
-  );
+  let raw: Record<string, unknown>;
+  try {
+    raw = await client.get<Record<string, unknown>>(
+      `/items/${encodeURIComponent(params.item_id)}`
+    );
+  } catch (err) {
+    if (err instanceof MercadoLibreError && err.isForbidden) {
+      return {
+        error: "item_endpoint_restricted",
+        message:
+          "ML restringiu /items/{id} para apps não-aprovadas. Os dados disponíveis sem este endpoint são preço, vendedor, condition, warranty, listing_type e tags (via get_catalog_product_items). Para descrição completa, use get_item_description que ainda funciona.",
+        upstream_status: 403,
+        item_id: params.item_id,
+        fallback_tools: ["get_catalog_product_items", "get_item_description"],
+        docs: "https://developers.mercadolivre.com.br/",
+      };
+    }
+    throw err;
+  }
   const attrs = (raw.attributes as RawAttribute[] | undefined) ?? [];
   const curated = attrs
     .filter((a) => a.id && KEY_ATTRIBUTE_IDS.has(a.id))
