@@ -182,6 +182,37 @@ describe("actions", () => {
     expect(cap.value).toContain("/categories/MLB1055");
   });
 
+  it("getSellerInfo lida com upstream real-world: transactions sem completed/canceled/ratings", async () => {
+    // Resposta real do ML em 2026-05-25 pra seller 141321244 (MORGAN.STORE_SP):
+    // o bloco `transactions` so traz `period` e `total`. completed/canceled/ratings
+    // sao omitidos pelo upstream — parser mapeia esses pra null e o caller deve
+    // se basear em reputation_level + power_seller_status + transactions_total.
+    globalThis.fetch = mockFetchJson({
+      id: 141321244,
+      nickname: "MORGAN.STORE_SP",
+      permalink: "http://perfil.mercadolivre.com.br/MORGAN.STORE_SP",
+      seller_reputation: {
+        level_id: "5_green",
+        power_seller_status: "platinum",
+        transactions: { period: "historic", total: 12126 },
+      },
+    });
+    const res = await getSellerInfo(client(), { seller_id: 141321244 }) as {
+      reputation_level: string;
+      power_seller_status: string;
+      transactions_total: number;
+      transactions_completed: number | null;
+      transactions_canceled: number | null;
+      ratings: unknown;
+    };
+    expect(res.reputation_level).toBe("5_green");
+    expect(res.power_seller_status).toBe("platinum");
+    expect(res.transactions_total).toBe(12126);
+    expect(res.transactions_completed).toBeNull();
+    expect(res.transactions_canceled).toBeNull();
+    expect(res.ratings).toBeNull();
+  });
+
   it("getSellerInfo extrai reputation_level e transactions", async () => {
     globalThis.fetch = mockFetchJson({
       id: 42,

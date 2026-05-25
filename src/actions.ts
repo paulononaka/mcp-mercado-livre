@@ -239,6 +239,18 @@ export async function getCategory(
   return client.get(`/categories/${encodeURIComponent(params.category_id)}`);
 }
 
+// Limitação confirmada via probe live (2026-05-25, 4 sellers diferentes):
+// o upstream `GET /users/{id}` devolve `seller_reputation.transactions` com
+// no máximo `period` e `total`. Os campos `completed`, `canceled` e
+// `ratings` simplesmente NÃO existem na resposta pra apps externas (mesmo
+// com OAuth válido + CNPJ + escopo correto). Não é bug do parser — o ML
+// não expõe esses dados a consumidores fora da conta dona do anúncio.
+// Campos confiáveis pra avaliar vendedor:
+//   - reputation_level ("5_green" é o topo)
+//   - power_seller_status ("platinum" > "gold" > "silver" > null)
+//   - transactions_total (volume histórico)
+// Campos quase sempre null (não usar como sinal):
+//   - transactions_completed, transactions_canceled, ratings
 export async function getSellerInfo(
   client: MercadoLibreClient,
   params: GetSellerInfoParams

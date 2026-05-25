@@ -78,7 +78,7 @@ const GET_CATEGORY_TOOL: Tool = {
 
 const GET_SELLER_INFO_TOOL: Tool = {
   name: "get_seller_info",
-  description: "Perfil do vendedor: reputation_level, power_seller_status, transactions_completed/canceled/total, ratings (positive/neutral/negative).",
+  description: "Perfil do vendedor. CAMPOS CONFIAVEIS pra recomendacao: reputation_level ('5_green' = topo, '4_light_green', '3_yellow', '2_orange', '1_red'), power_seller_status ('platinum' > 'gold' > 'silver' > null), transactions_total (volume historico), nickname, permalink. CAMPOS QUASE SEMPRE NULL (upstream do ML nao expoe a apps externas, mesmo com OAuth+CNPJ+escopo OK — confirmado 2026-05-25): transactions_completed, transactions_canceled, ratings (positive/neutral/negative). NAO use esses 3 como sinal — caia em reputation_level + power_seller_status + transactions_total como proxies.",
   inputSchema: {
     type: "object",
     properties: { seller_id: { type: "number", description: "Seller user ID" } },

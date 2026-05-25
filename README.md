@@ -66,6 +66,38 @@ Fork de [`@dan1d/mercadolibre-mcp`](https://github.com/dan1d/mercadolibre-mcp) `
 | `get_trends` | Buscas em alta. |
 | `get_currency_conversion` | Conversão BRL/USD/ARS/MXN com rate ML. |
 
+## Limitações conhecidas
+
+### `search_items` retorna 403 desde 2025
+
+O ML restringiu `GET /sites/MLB/search` pra apps não-aprovadas (confirmado por múltiplos devs no Reclame Aqui ago/2025–jan/2026). Apps com OAuth válido + CNPJ + escopo correto continuam recebendo 403.
+
+A tool detecta o 403 e retorna objeto estruturado em vez de propagar erro cru:
+
+```json
+{
+  "error": "search_endpoint_restricted",
+  "message": "ML restringiu /sites/MLB/search desde 2025 ...",
+  "upstream_status": 403,
+  "fallback_tools": ["get_catalog_product", "get_catalog_product_items", "get_item"],
+  "docs": "https://developers.mercadolivre.com.br/"
+}
+```
+
+**Caminho recomendado:** usar busca externa (`web_search` ou Google `site:mercadolivre.com.br`) pra descobrir o `catalog_id` (formato `MLB...`), depois consultar via `get_catalog_product` + `get_catalog_product_items` (com `enrich_seller=true` e `include_permalink=true` se precisar de reputação/URL inline).
+
+### `get_seller_info`: 3 campos quase sempre `null`
+
+Confirmado via probe live em 2026-05-25 pra 4 sellers distintos (`141321244`, `175345466`, `296064033`, `213475298`): o upstream `GET /users/{id}` retorna `seller_reputation.transactions` com no máximo `period` e `total`. Os campos `transactions_completed`, `transactions_canceled` e `ratings` (positive/neutral/negative) simplesmente **não existem** na resposta pra apps externas — o ML não os expõe a consumidores fora da conta dona do anúncio.
+
+**Use como sinal de qualidade do vendedor:**
+- `reputation_level` (`"5_green"` é o topo; depois `"4_light_green"`, `"3_yellow"`, `"2_orange"`, `"1_red"`)
+- `power_seller_status` (`"platinum"` > `"gold"` > `"silver"` > `null`)
+- `transactions_total` (volume histórico)
+- `nickname` + `permalink` (loja oficial ≠ revendedor)
+
+**Ignore:** `transactions_completed`, `transactions_canceled`, `ratings` (null na maioria dos casos).
+
 ## Test
 
 ```bash
