@@ -17,6 +17,43 @@ const DEFAULT_SITE_ID = "MLB";
 const DEFAULT_SEARCH_LIMIT = 10;
 const MAX_SEARCH_LIMIT = 50;
 
+// Dicionário de tags conhecidas observadas em /products/{id}/items.
+// Mapeia o slug opaco do ML pro que ele significa em PT-BR — referência
+// pro caller saber o que olhar pra recomendação. As 3 tags acionáveis
+// (`brand_verified`, `immediate_payment`, `cart_eligible`) são decodificadas
+// em `tags_decoded` no output de `get_catalog_product_items`.
+const CATALOG_ITEM_TAG_DOC: Record<string, string> = {
+  brand_verified: "vendedor é loja oficial verificada da marca",
+  cart_eligible: "anúncio aceita compra via carrinho",
+  immediate_payment: "pagamento obrigatório no checkout",
+  good_quality_thumbnail: "ML validou qualidade da imagem principal",
+  standard_price_by_quantity: "vendedor oferece preço escalonado por volume",
+  kvs_primary: "anúncio principal do produto na busca (key value seller)",
+  dynamic_standard_price: "preço dinâmico (ajusta com base em demanda/concorrência)",
+  has_published_clips: "anúncio tem vídeos publicados",
+  user_product_unify: "anúncio unificado (várias listings agrupadas)",
+  best_seller_candidate: "forte candidato a destaque na categoria",
+  incomplete_technical_specs: "atributos técnicos faltando no anúncio",
+  supermarket_eligible: "elegível pro Mercado Online (supermercado)",
+};
+
+interface DecodedTags {
+  is_official_brand_store: boolean;
+  requires_immediate_payment: boolean;
+  supports_cart: boolean;
+}
+
+function decodeTags(tags: string[] | undefined): DecodedTags {
+  const t = tags ?? [];
+  return {
+    is_official_brand_store: t.includes("brand_verified"),
+    requires_immediate_payment: t.includes("immediate_payment"),
+    supports_cart: t.includes("cart_eligible"),
+  };
+}
+
+export { CATALOG_ITEM_TAG_DOC };
+
 const KEY_ATTRIBUTE_IDS = new Set([
   "BRAND",
   "MODEL",
@@ -398,6 +435,7 @@ export async function getCatalogProductItems(
     international: it.international_delivery_mode && it.international_delivery_mode !== "none",
     accepts_mercadopago: it.accepts_mercadopago,
     tags: it.tags,
+    tags_decoded: decodeTags(it.tags),
   }));
 
   const enrichmentTasks: Array<Promise<unknown>> = [];

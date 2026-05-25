@@ -294,6 +294,46 @@ describe("actions", () => {
     expect(res.results[1]).toMatchObject({ seller_id: 111, price: 5099, full_fulfillment: false, warranty: null });
   });
 
+  it("getCatalogProductItems tags_decoded reflete brand_verified/immediate_payment/cart_eligible", async () => {
+    globalThis.fetch = mockFetchJson({
+      paging: { total: 3 },
+      results: [
+        { item_id: "MLB1", seller_id: 11, price: 10, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: ["brand_verified", "immediate_payment", "cart_eligible"] },
+        { item_id: "MLB2", seller_id: 22, price: 20, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: ["cart_eligible"] },
+        { item_id: "MLB3", seller_id: 33, price: 30, currency_id: "BRL", condition: "new", listing_type_id: "gold", tags: [] },
+      ],
+    });
+    const res = await getCatalogProductItems(client(), { catalog_id: "MLB1" }) as {
+      results: Array<{ tags_decoded: { is_official_brand_store: boolean; requires_immediate_payment: boolean; supports_cart: boolean } }>;
+    };
+    expect(res.results[0].tags_decoded).toEqual({
+      is_official_brand_store: true,
+      requires_immediate_payment: true,
+      supports_cart: true,
+    });
+    expect(res.results[1].tags_decoded).toEqual({
+      is_official_brand_store: false,
+      requires_immediate_payment: false,
+      supports_cart: true,
+    });
+    expect(res.results[2].tags_decoded).toEqual({
+      is_official_brand_store: false,
+      requires_immediate_payment: false,
+      supports_cart: false,
+    });
+  });
+
+  it("getCatalogProductItems tags_decoded vazio quando tags undefined", async () => {
+    globalThis.fetch = mockFetchJson({
+      paging: { total: 1 },
+      results: [{ item_id: "MLB1", seller_id: 11, price: 10, currency_id: "BRL", condition: "new", listing_type_id: "gold" }],
+    });
+    const res = await getCatalogProductItems(client(), { catalog_id: "MLB1" }) as {
+      results: Array<{ tags_decoded: { is_official_brand_store: boolean } }>;
+    };
+    expect(res.results[0].tags_decoded.is_official_brand_store).toBe(false);
+  });
+
   it("getCatalogProductItems respeita limit max 100", async () => {
     const cap: { value?: string } = {};
     globalThis.fetch = mockFetchJson({ paging: {}, results: [] }, cap);
